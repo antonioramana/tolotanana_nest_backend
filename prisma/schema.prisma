@@ -124,6 +124,7 @@ model Campaign {
   updates            CampaignUpdate[]
   favorites          Favorite[]
   thankYouMessages   ThankYouMessage[]
+  campaignThankYouMessages CampaignThankYouMessage[]
 
   @@map("campaigns")
 }
@@ -214,6 +215,20 @@ model ThankYouMessage {
   donation Donation @relation(fields: [donationId], references: [id], onDelete: Cascade)
 
   @@map("thank_you_messages")
+}
+
+model CampaignThankYouMessage {
+  id         String   @id @default(cuid())
+  campaignId String
+  message    String
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@map("campaign_thank_you_messages")
 }
 
 model TermsOfService {

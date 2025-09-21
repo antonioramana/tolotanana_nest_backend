@@ -82,6 +82,7 @@ CREATE TABLE "donations" (
     "id" TEXT NOT NULL,
     "campaignId" TEXT NOT NULL,
     "donorId" TEXT,
+    "donorName" TEXT,
     "amount" DECIMAL(10,2) NOT NULL,
     "message" TEXT,
     "isAnonymous" BOOLEAN NOT NULL DEFAULT false,
@@ -146,6 +147,31 @@ CREATE TABLE "thank_you_messages" (
     CONSTRAINT "thank_you_messages_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "campaign_thank_you_messages" (
+    "id" TEXT NOT NULL,
+    "campaignId" TEXT NOT NULL,
+    "message" TEXT NOT NULL,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "campaign_thank_you_messages_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "terms_of_service" (
+    "id" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "content" TEXT NOT NULL,
+    "version" TEXT NOT NULL DEFAULT '1.0',
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "terms_of_service_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
 
@@ -196,3 +222,6 @@ ALTER TABLE "thank_you_messages" ADD CONSTRAINT "thank_you_messages_campaignId_f
 
 -- AddForeignKey
 ALTER TABLE "thank_you_messages" ADD CONSTRAINT "thank_you_messages_donationId_fkey" FOREIGN KEY ("donationId") REFERENCES "donations"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "campaign_thank_you_messages" ADD CONSTRAINT "campaign_thank_you_messages_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "campaigns"("id") ON DELETE CASCADE ON UPDATE CASCADE;

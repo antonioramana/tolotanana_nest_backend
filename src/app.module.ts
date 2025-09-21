@@ -13,6 +13,7 @@ import { StatisticsModule } from './statistics/statistics.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { HealthModule } from './health/health.module';
 import { TermsOfServiceModule } from './terms-of-service/terms-of-service.module';
+import { CampaignThankYouMessagesModule } from './campaign-thank-you-messages/campaign-thank-you-messages.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 
@@ -36,6 +37,7 @@ import { join } from 'path';
     UploadsModule,
     HealthModule,
     TermsOfServiceModule,
+    CampaignThankYouMessagesModule,
   ],
 })
 export class AppModule {}

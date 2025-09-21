@@ -154,4 +154,24 @@ export class BankInfoService {
       data: { isDefault: true },
     });
   }
+
+  async findAdminBankInfo() {
+    // Trouver l'utilisateur admin
+    const admin = await this.prisma.user.findFirst({
+      where: { role: 'admin' },
+    });
+
+    if (!admin) {
+      throw new NotFoundException('Aucun administrateur trouvé');
+    }
+
+    // Récupérer les informations bancaires de l'admin
+    return this.prisma.bankInfo.findMany({
+      where: { userId: admin.id },
+      orderBy: [
+        { isDefault: 'desc' },
+        { createdAt: 'desc' },
+      ],
+    });
+  }
 }
