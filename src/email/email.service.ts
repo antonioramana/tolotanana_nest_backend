@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import { ConfigService } from '@nestjs/config';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
 
 @Injectable()
 export class EmailService {
@@ -9,7 +11,10 @@ export class EmailService {
   private lastEmailTime = 0;
   private minDelayBetweenEmails = 3000; // Délai minimum entre les emails (ajusté selon le provider)
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private httpService: HttpService
+  ) {
     this.createTransporter();
   }
 
@@ -184,12 +189,13 @@ export class EmailService {
   private async sendMailWithRetry(mailOptions: any, maxRetries: number = 3): Promise<any> {
     let lastError;
     
+    // Essayer d'abord SMTP traditionnel
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         await this.waitForRateLimit();
         const result = await this.transporter.sendMail(mailOptions);
         if (attempt > 1) {
-          this.logger.log(`✅ Email envoyé avec succès après ${attempt} tentatives`);
+          this.logger.log(`✅ Email envoyé avec succès via SMTP après ${attempt} tentatives`);
         }
         return result;
       } catch (error) {
@@ -199,7 +205,7 @@ export class EmailService {
         const errorMessage = (error as any)?.message || 'Unknown error';
         
         if (errorCode === 'ETIMEDOUT' || errorMessage.includes('timeout') || errorMessage.includes('connection')) {
-          this.logger.warn(`⚠️ Tentative ${attempt}/${maxRetries} échouée (timeout): ${errorMessage}`);
+          this.logger.warn(`⚠️ Tentative SMTP ${attempt}/${maxRetries} échouée (timeout): ${errorMessage}`);
           
           if (attempt < maxRetries) {
             // Essayer une configuration alternative de Gmail si disponible
@@ -219,7 +225,25 @@ export class EmailService {
       }
     }
     
-    throw lastError;
+    // Si SMTP a complètement échoué, essayer les méthodes alternatives
+    this.logger.warn('❌ SMTP a échoué après toutes les tentatives. Essai des méthodes alternatives...');
+    
+    try {
+      // Méthode 1: Essayer SendGrid/Mailgun API
+      return await this.sendViaHttpApi(mailOptions);
+    } catch (httpError) {
+      this.logger.warn('❌ API HTTP a également échoué');
+      
+      try {
+        // Méthode 2: Webhook de notification externe
+        return await this.sendViaWebhook(mailOptions);
+      } catch (webhookError) {
+        this.logger.warn('❌ Webhook a également échoué');
+        
+        // Méthode 3: Mode dégradé - log pour traitement manuel
+        return await this.logForManualProcessing(mailOptions, lastError);
+      }
+    }
   }
 
   private isGmailEnvironment(): boolean {
@@ -237,6 +261,150 @@ export class EmailService {
     } catch (error) {
       this.logger.warn('⚠️ Impossible de basculer vers la configuration alternative');
     }
+  }
+
+  private async sendViaHttpApi(mailOptions: any): Promise<any> {
+    this.logger.log('🌐 Tentative d\'envoi via API HTTP...');
+    
+    // Essayer d'abord avec un service simple (peut être configuré avec WEBHOOK_EMAIL_URL)
+    const webhookUrl = this.configService.get<string>('WEBHOOK_EMAIL_URL');
+    if (webhookUrl) {
+      try {
+        const payload = {
+          to: mailOptions.to,
+          from: typeof mailOptions.from === 'object' ? mailOptions.from.address : mailOptions.from,
+          subject: mailOptions.subject,
+          html: mailOptions.html,
+          timestamp: new Date().toISOString(),
+          service: 'tolotanana-contact'
+        };
+
+        const response = await firstValueFrom(
+          this.httpService.post(webhookUrl, payload, {
+            headers: {
+              'Content-Type': 'application/json',
+              'User-Agent': 'Tolotanana-EmailService/1.0'
+            },
+            timeout: 10000
+          })
+        );
+
+        this.logger.log('✅ Email envoyé avec succès via API HTTP');
+        return { messageId: 'http-api-' + Date.now(), response: (response as any).data };
+      } catch (error) {
+        this.logger.warn('❌ Échec envoi via API HTTP:', (error as any)?.message);
+        throw error;
+      }
+    }
+
+    // Si pas de webhook configuré, essayer EmailJS (service gratuit)
+    return await this.sendViaEmailJS(mailOptions);
+  }
+
+  private async sendViaEmailJS(mailOptions: any): Promise<any> {
+    const emailJsServiceId = this.configService.get<string>('EMAILJS_SERVICE_ID');
+    const emailJsTemplateId = this.configService.get<string>('EMAILJS_TEMPLATE_ID');
+    const emailJsUserId = this.configService.get<string>('EMAILJS_USER_ID');
+
+    if (!emailJsServiceId || !emailJsTemplateId || !emailJsUserId) {
+      throw new Error('EmailJS non configuré');
+    }
+
+    try {
+      const payload = {
+        service_id: emailJsServiceId,
+        template_id: emailJsTemplateId,
+        user_id: emailJsUserId,
+        template_params: {
+          to_email: mailOptions.to,
+          from_name: 'TOLOTANANA',
+          subject: mailOptions.subject,
+          message_html: mailOptions.html,
+        }
+      };
+
+      const response = await firstValueFrom(
+        this.httpService.post('https://api.emailjs.com/api/v1.0/email/send', payload, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 15000
+        })
+      );
+
+      this.logger.log('✅ Email envoyé avec succès via EmailJS');
+      return { messageId: 'emailjs-' + Date.now(), response: (response as any).data };
+    } catch (error) {
+      this.logger.warn('❌ Échec envoi via EmailJS:', (error as any)?.message);
+      throw error;
+    }
+  }
+
+  private async sendViaWebhook(mailOptions: any): Promise<any> {
+    this.logger.log('🪝 Tentative d\'envoi via webhook externe...');
+    
+    const webhookUrl = this.configService.get<string>('FALLBACK_WEBHOOK_URL');
+    if (!webhookUrl) {
+      throw new Error('Pas de webhook de fallback configuré');
+    }
+
+    try {
+      const payload = {
+        type: 'email_failed',
+        email: {
+          to: mailOptions.to,
+          from: typeof mailOptions.from === 'object' ? mailOptions.from.address : mailOptions.from,
+          subject: mailOptions.subject,
+          html: mailOptions.html,
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          service: 'tolotanana',
+          reason: 'smtp_timeout'
+        }
+      };
+
+      const response = await firstValueFrom(
+        this.httpService.post(webhookUrl, payload, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 10000
+        })
+      );
+
+      this.logger.log('✅ Notification webhook envoyée avec succès');
+      return { messageId: 'webhook-' + Date.now(), response: (response as any).data };
+    } catch (error) {
+      this.logger.warn('❌ Échec envoi webhook:', (error as any)?.message);
+      throw error;
+    }
+  }
+
+  private async logForManualProcessing(mailOptions: any, originalError: any): Promise<any> {
+    this.logger.error('📝 Mode dégradé: Email enregistré pour traitement manuel');
+    
+    const emailLog = {
+      timestamp: new Date().toISOString(),
+      to: mailOptions.to,
+      from: typeof mailOptions.from === 'object' ? mailOptions.from.address : mailOptions.from,
+      subject: mailOptions.subject,
+      html: mailOptions.html,
+      originalError: (originalError as any)?.message || 'Unknown error',
+      status: 'pending_manual_processing'
+    };
+
+    // Log détaillé pour que l'admin puisse traiter manuellement
+    this.logger.error('📧 EMAIL NÉCESSITANT TRAITEMENT MANUEL:');
+    this.logger.error('   Destinataire:', emailLog.to);
+    this.logger.error('   Sujet:', emailLog.subject);
+    this.logger.error('   Erreur:', emailLog.originalError);
+    this.logger.error('   ⚠️ Cet email devra être envoyé manuellement');
+
+    // Optionnel: Sauvegarder dans un fichier ou une base de données
+    // await this.saveFailedEmail(emailLog);
+
+    return { 
+      messageId: 'manual-' + Date.now(), 
+      status: 'logged_for_manual_processing',
+      details: emailLog 
+    };
   }
 
   async sendContactReply(
