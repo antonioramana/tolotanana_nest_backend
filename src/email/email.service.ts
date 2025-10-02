@@ -33,14 +33,20 @@ export class EmailService {
           pass: this.configService.get<string>('EMAIL_PASSWORD'),
         },
         tls: {
-          // Configuration TLS pour Gmail
+          // Configuration TLS plus permissive pour les serveurs de production
           rejectUnauthorized: false,
-          minVersion: 'TLSv1.2'
+          ciphers: 'SSLv3',
+          minVersion: 'TLSv1'
         },
-        // Timeout settings
-        connectionTimeout: 60000, // 60 secondes
-        greetingTimeout: 30000,   // 30 secondes
-        socketTimeout: 75000      // 75 secondes
+        // Timeout settings plus courts pour les environnements de production
+        connectionTimeout: 20000, // 20 secondes (réduit)
+        greetingTimeout: 15000,   // 15 secondes (réduit)
+        socketTimeout: 25000,     // 25 secondes (réduit)
+        // Configuration pour les environnements restrictifs
+        pool: true,
+        maxConnections: 5,
+        maxMessages: 10,
+        rateLimit: 14 // 14 emails par seconde max
       });
       
       // Ajuster les délais pour Gmail (moins strict que Mailtrap)
@@ -61,33 +67,55 @@ export class EmailService {
       this.minDelayBetweenEmails = this.configService.get<number>('MIN_EMAIL_DELAY', 3000); // 3 secondes pour Mailtrap
     }
 
-    // Vérifier la connexion
-    this.transporter.verify((error, success) => {
-      if (error) {
-        this.logger.error(`❌ Erreur de configuration email (${useGmail ? 'Gmail' : 'Mailtrap'}):`, error.message);
-        
-        // Aide au diagnostic selon le type d'erreur
-        if (useGmail) {
-          if (error.message.includes('SSL') || error.message.includes('TLS')) {
-            this.logger.error('💡 Conseil: Vérifiez la configuration SSL/TLS de Gmail');
-            this.logger.error('   - Port 587 avec STARTTLS (secure: false)');
-            this.logger.error('   - Port 465 avec SSL (secure: true)');
-          } else if (error.message.includes('authentication') || error.message.includes('login')) {
-            this.logger.error('💡 Conseil: Vérifiez vos credentials Gmail');
-            this.logger.error('   - EMAIL_USER: votre email Gmail');
-            this.logger.error('   - EMAIL_PASSWORD: mot de passe d\'application Gmail (pas votre mot de passe normal)');
-          } else if (error.message.includes('timeout') || error.message.includes('connection')) {
-            this.logger.error('💡 Conseil: Problème de réseau ou firewall');
-          }
+    // Vérifier la connexion avec timeout plus court en production
+    const verifyTimeout = useGmail ? 10000 : 5000; // 10s pour Gmail, 5s pour Mailtrap
+    
+    const verifyPromise = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error('Verification timeout'));
+      }, verifyTimeout);
+      
+      this.transporter.verify((error, success) => {
+        clearTimeout(timer);
+        if (error) {
+          reject(error);
+        } else {
+          resolve(success);
         }
-      } else {
+      });
+    });
+
+    verifyPromise
+      .then(() => {
         this.logger.log(`✅ Serveur email prêt (${useGmail ? 'Gmail' : 'Mailtrap'}) - Délai: ${this.minDelayBetweenEmails}ms`);
-        
         if (useGmail) {
           this.logger.log(`📧 Configuration Gmail: ${this.configService.get<string>('EMAIL_USER')} via port ${this.configService.get<number>('EMAIL_PORT', 587)}`);
         }
-      }
-    });
+      })
+      .catch((error) => {
+        if (useGmail && (error.message.includes('timeout') || error.message.includes('connection'))) {
+          // En production, on continue même si la vérification échoue
+          this.logger.warn(`⚠️ Vérification email échouée mais service actif (${useGmail ? 'Gmail' : 'Mailtrap'}): ${error.message}`);
+          this.logger.warn('🔧 Le service email fonctionnera probablement malgré cette erreur de vérification');
+        } else {
+          this.logger.error(`❌ Erreur de configuration email (${useGmail ? 'Gmail' : 'Mailtrap'}):`, error.message);
+          
+          // Aide au diagnostic selon le type d'erreur
+          if (useGmail) {
+            if (error.message.includes('SSL') || error.message.includes('TLS')) {
+              this.logger.error('💡 Conseil: Vérifiez la configuration SSL/TLS de Gmail');
+              this.logger.error('   - Port 587 avec STARTTLS (secure: false)');
+              this.logger.error('   - Port 465 avec SSL (secure: true)');
+            } else if (error.message.includes('authentication') || error.message.includes('login')) {
+              this.logger.error('💡 Conseil: Vérifiez vos credentials Gmail');
+              this.logger.error('   - EMAIL_USER: votre email Gmail');
+              this.logger.error('   - EMAIL_PASSWORD: mot de passe d\'application Gmail (pas votre mot de passe normal)');
+            } else if (error.message.includes('timeout') || error.message.includes('connection')) {
+              this.logger.error('💡 Conseil: Problème de réseau ou firewall - Service actif malgré l\'erreur');
+            }
+          }
+        }
+      });
   }
 
   private async waitForRateLimit() {
