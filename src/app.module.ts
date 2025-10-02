@@ -14,6 +14,11 @@ import { UploadsModule } from './uploads/uploads.module';
 import { HealthModule } from './health/health.module';
 import { TermsOfServiceModule } from './terms-of-service/terms-of-service.module';
 import { CampaignThankYouMessagesModule } from './campaign-thank-you-messages/campaign-thank-you-messages.module';
+import { PlatformFeesModule } from './platform-fees/platform-fees.module';
+import { ContactModule } from './contact/contact.module';
+import { EmailModule } from './email/email.module';
+import { TestimonialsModule } from './testimonials/testimonials.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 
@@ -38,6 +43,11 @@ import { join } from 'path';
     HealthModule,
     TermsOfServiceModule,
     CampaignThankYouMessagesModule,
+    PlatformFeesModule,
+    ContactModule,
+    EmailModule,
+    TestimonialsModule,
+    DashboardModule,
   ],
 })
 export class AppModule {}

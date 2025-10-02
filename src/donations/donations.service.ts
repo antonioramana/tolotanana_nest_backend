@@ -9,12 +9,14 @@ import { UpdateDonationDto } from './dto/update-donation.dto';
 import { DonationFilterDto } from './dto/donation-filter.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { ThankYouMessagesService } from '../thank-you-messages/thank-you-messages.service';
+import { PlatformFeesService } from '../platform-fees/platform-fees.service';
 
 @Injectable()
 export class DonationsService {
   constructor(
     private prisma: PrismaService,
     private thankYouMessagesService: ThankYouMessagesService,
+    private platformFeesService: PlatformFeesService,
   ) {}
 
   async create(createDonationDto: CreateDonationDto, donorId?: string) {
@@ -37,8 +39,9 @@ export class DonationsService {
       throw new BadRequestException('Cette campagne est expirée');
     }
 
-    // Calculer les frais de plateforme (exemple: 5%)
-    const platformFee = Number(amount) * 0.05;
+    // Calculer les frais de plateforme dynamiques
+    const platformFeePercentage = await this.platformFeesService.getCurrentPercentage();
+    const platformFee = Number(amount) * (platformFeePercentage / 100);
     const netAmount = Number(amount) - platformFee;
 
     // Créer la donation

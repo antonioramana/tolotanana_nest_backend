@@ -64,6 +64,9 @@ model User {
   withdrawalRequests WithdrawalRequest[]
   favorites          Favorite[]
   processedRequests  WithdrawalRequest[] @relation("ProcessedBy")
+  platformFees       PlatformFees[]
+  contactReplies     ContactMessage[]
+  testimonials       Testimonial[]
 
   @@map("users")
 }
@@ -241,4 +244,59 @@ model TermsOfService {
   updatedAt DateTime @updatedAt
 
   @@map("terms_of_service")
+}
+
+model PlatformFees {
+  id          String   @id @default(cuid())
+  percentage  Float    @default(5.0) // Pourcentage des frais (par défaut 5%)
+  isActive    Boolean  @default(true)
+  description String?  // Description optionnelle des frais
+  createdBy   String   // ID de l'admin qui a créé/modifié
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relation avec l'utilisateur qui a créé/modifié
+  creator User @relation(fields: [createdBy], references: [id])
+
+  @@map("platform_fees")
+}
+
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String   // Nom de la personne qui contacte
+  email     String   // Email de contact
+  subject   String   // Sujet du message
+  message   String   @db.Text // Contenu du message
+  isRead    Boolean  @default(false) // Statut de lecture par l'admin
+  isReplied Boolean  @default(false) // Statut de réponse
+  reply     String?  @db.Text // Réponse de l'admin (optionnel)
+  repliedBy String?  // ID de l'admin qui a répondu
+  repliedAt DateTime? // Date de réponse
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relation avec l'admin qui a répondu
+  replier User? @relation(fields: [repliedBy], references: [id])
+
+  @@map("contact_messages")
+}
+
+model Testimonial {
+  id          String   @id @default(cuid())
+  name        String   // Nom de la personne
+  role        String   // Rôle : "Bénéficiaire", "Créateur de campagne", "Donatrice", etc.
+  avatar      String?  // URL de l'avatar (optionnel)
+  content     String   @db.Text // Contenu du témoignage
+  campaign    String?  // Nom de la campagne associée (optionnel)
+  rating      Int      @default(5) // Note sur 5 étoiles
+  isActive    Boolean  @default(true) // Témoignage actif/inactif
+  isHighlight Boolean  @default(false) // Témoignage mis en avant
+  createdBy   String   // ID de l'admin qui a créé
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relation avec l'admin qui a créé
+  creator User @relation(fields: [createdBy], references: [id])
+
+  @@map("testimonials")
 }
