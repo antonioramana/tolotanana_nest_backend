@@ -87,6 +87,7 @@ export class TestimonialsService {
         content: true,
         campaign: true,
         rating: true,
+        isHighlight: true,
         createdAt: true,
       },
     });

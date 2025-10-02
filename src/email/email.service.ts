@@ -7,29 +7,85 @@ export class EmailService {
   private transporter: nodemailer.Transporter;
   private readonly logger = new Logger(EmailService.name);
   private lastEmailTime = 0;
-  private readonly minDelayBetweenEmails = 3000; // 3 secondes minimum entre les emails (Mailtrap strict)
+  private minDelayBetweenEmails = 3000; // Délai minimum entre les emails (ajusté selon le provider)
 
   constructor(private configService: ConfigService) {
     this.createTransporter();
   }
 
   private createTransporter() {
-    // Configuration pour Mailtrap
-    this.transporter = nodemailer.createTransport({
-      host: this.configService.get<string>('MAILTRAP_HOST', 'sandbox.smtp.mailtrap.io'),
-      port: this.configService.get<number>('MAILTRAP_PORT', 2525),
-      auth: {
-        user: this.configService.get<string>('MAILTRAP_USER'),
-        pass: this.configService.get<string>('MAILTRAP_PASSWORD'),
-      },
-    });
+    const nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
+    const useGmail = nodeEnv === 'production' || this.configService.get<string>('EMAIL_PROVIDER') === 'gmail';
+
+    if (useGmail) {
+      // Configuration Gmail pour production
+      this.logger.log('📧 Configuration Gmail SMTP (Production)');
+      const gmailPort = this.configService.get<number>('EMAIL_PORT', 587);
+      
+      this.transporter = nodemailer.createTransport({
+        service: 'gmail', // Utilise la configuration prédéfinie de Gmail
+        host: this.configService.get<string>('EMAIL_HOST', 'smtp.gmail.com'),
+        port: gmailPort,
+        secure: gmailPort === 465, // true pour port 465, false pour port 587
+        requireTLS: true, // Force l'utilisation de TLS
+        auth: {
+          user: this.configService.get<string>('EMAIL_USER'),
+          pass: this.configService.get<string>('EMAIL_PASSWORD'),
+        },
+        tls: {
+          // Configuration TLS pour Gmail
+          rejectUnauthorized: false,
+          minVersion: 'TLSv1.2'
+        },
+        // Timeout settings
+        connectionTimeout: 60000, // 60 secondes
+        greetingTimeout: 30000,   // 30 secondes
+        socketTimeout: 75000      // 75 secondes
+      });
+      
+      // Ajuster les délais pour Gmail (moins strict que Mailtrap)
+      this.minDelayBetweenEmails = this.configService.get<number>('MIN_EMAIL_DELAY', 1000); // 1 seconde pour Gmail
+    } else {
+      // Configuration Mailtrap pour développement
+      this.logger.log('📧 Configuration Mailtrap SMTP (Développement)');
+      this.transporter = nodemailer.createTransport({
+        host: this.configService.get<string>('MAILTRAP_HOST', 'sandbox.smtp.mailtrap.io'),
+        port: this.configService.get<number>('MAILTRAP_PORT', 2525),
+        auth: {
+          user: this.configService.get<string>('MAILTRAP_USER'),
+          pass: this.configService.get<string>('MAILTRAP_PASSWORD'),
+        },
+      });
+      
+      // Garder les délais stricts pour Mailtrap
+      this.minDelayBetweenEmails = this.configService.get<number>('MIN_EMAIL_DELAY', 3000); // 3 secondes pour Mailtrap
+    }
 
     // Vérifier la connexion
     this.transporter.verify((error, success) => {
       if (error) {
-        this.logger.error('Erreur de configuration email:', error);
+        this.logger.error(`❌ Erreur de configuration email (${useGmail ? 'Gmail' : 'Mailtrap'}):`, error.message);
+        
+        // Aide au diagnostic selon le type d'erreur
+        if (useGmail) {
+          if (error.message.includes('SSL') || error.message.includes('TLS')) {
+            this.logger.error('💡 Conseil: Vérifiez la configuration SSL/TLS de Gmail');
+            this.logger.error('   - Port 587 avec STARTTLS (secure: false)');
+            this.logger.error('   - Port 465 avec SSL (secure: true)');
+          } else if (error.message.includes('authentication') || error.message.includes('login')) {
+            this.logger.error('💡 Conseil: Vérifiez vos credentials Gmail');
+            this.logger.error('   - EMAIL_USER: votre email Gmail');
+            this.logger.error('   - EMAIL_PASSWORD: mot de passe d\'application Gmail (pas votre mot de passe normal)');
+          } else if (error.message.includes('timeout') || error.message.includes('connection')) {
+            this.logger.error('💡 Conseil: Problème de réseau ou firewall');
+          }
+        }
       } else {
-        this.logger.log('Serveur email prêt à envoyer des messages');
+        this.logger.log(`✅ Serveur email prêt (${useGmail ? 'Gmail' : 'Mailtrap'}) - Délai: ${this.minDelayBetweenEmails}ms`);
+        
+        if (useGmail) {
+          this.logger.log(`📧 Configuration Gmail: ${this.configService.get<string>('EMAIL_USER')} via port ${this.configService.get<number>('EMAIL_PORT', 587)}`);
+        }
       }
     });
   }
