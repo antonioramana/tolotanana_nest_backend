@@ -18,56 +18,107 @@ export class EmailService {
     const useGmail = nodeEnv === 'production' || this.configService.get<string>('EMAIL_PROVIDER') === 'gmail';
 
     if (useGmail) {
-      // Configuration Gmail pour production
-      this.logger.log('📧 Configuration Gmail SMTP (Production)');
-      const gmailPort = this.configService.get<number>('EMAIL_PORT', 587);
-      
-      this.transporter = nodemailer.createTransport({
-        host: this.configService.get<string>('EMAIL_HOST', 'smtp.gmail.com'),
-        port: gmailPort,
-        secure: gmailPort === 465, // true pour port 465, false pour port 587
-        requireTLS: true, // Force l'utilisation de TLS
-        auth: {
-          user: this.configService.get<string>('EMAIL_USER'),
-          pass: this.configService.get<string>('EMAIL_PASSWORD'),
-        },
-        tls: {
-          // Configuration TLS robuste pour les serveurs de production
-          rejectUnauthorized: false,
-          ciphers: 'SSLv3',
-          minVersion: 'TLSv1.2'
-        },
-        // Timeout settings optimisés pour la stabilité en production
-        connectionTimeout: 60000, // 60 secondes (plus tolérant)
-        greetingTimeout: 30000,   // 30 secondes (plus tolérant)
-        socketTimeout: 45000,     // 45 secondes (plus tolérant)
-        // Configuration pour les environnements restrictifs
-        pool: true,
-        maxConnections: 5,
-        maxMessages: 10,
-        rateLimit: 14 // 14 emails par seconde max
-      } as nodemailer.TransportOptions);
-      
-      // Ajuster les délais pour Gmail (moins strict que Mailtrap)
-      this.minDelayBetweenEmails = this.configService.get<number>('MIN_EMAIL_DELAY', 1000); // 1 seconde pour Gmail
+      this.createGmailTransporter();
     } else {
-      // Configuration Mailtrap pour développement
-      this.logger.log('📧 Configuration Mailtrap SMTP (Développement)');
-      this.transporter = nodemailer.createTransport({
-        host: this.configService.get<string>('MAILTRAP_HOST', 'sandbox.smtp.mailtrap.io'),
-        port: this.configService.get<number>('MAILTRAP_PORT', 2525),
-        auth: {
-          user: this.configService.get<string>('MAILTRAP_USER'),
-          pass: this.configService.get<string>('MAILTRAP_PASSWORD'),
-        },
-      });
-      
-      // Garder les délais stricts pour Mailtrap
-      this.minDelayBetweenEmails = this.configService.get<number>('MIN_EMAIL_DELAY', 3000); // 3 secondes pour Mailtrap
+      this.createMailtrapTransporter();
     }
+  }
 
-    // Vérifier la connexion avec timeout optimisé pour la stabilité
-    const verifyTimeout = useGmail ? 30000 : 10000; // 30s pour Gmail, 10s pour Mailtrap
+  private createGmailTransporter() {
+    this.logger.log('📧 Configuration Gmail SMTP (Production)');
+    
+    // Essayer différentes configurations Gmail selon l'environnement
+    const gmailConfigs = this.getGmailConfigurations();
+    
+    // Utiliser la première configuration (la plus robuste pour Render/production)
+    const config = gmailConfigs[0];
+    this.logger.log(`🔧 Utilisation configuration Gmail: Port ${config.port}, Pool: ${config.pool}`);
+    
+    this.transporter = nodemailer.createTransport(config);
+    
+    // Ajuster les délais pour Gmail (moins strict que Mailtrap)
+    this.minDelayBetweenEmails = this.configService.get<number>('MIN_EMAIL_DELAY', 1000);
+    
+    this.verifyConnection('Gmail');
+  }
+
+  private getGmailConfigurations() {
+    const baseAuth = {
+      user: this.configService.get<string>('EMAIL_USER'),
+      pass: this.configService.get<string>('EMAIL_PASSWORD'),
+    };
+
+    const baseTls = {
+      rejectUnauthorized: false,
+      ciphers: 'SSLv3',
+      minVersion: 'TLSv1.2'
+    };
+
+    // Configuration 1: Sans pool, timeouts très longs (pour Render/production restrictive)
+    const config1 = {
+      host: this.configService.get<string>('EMAIL_HOST', 'smtp.gmail.com'),
+      port: this.configService.get<number>('EMAIL_PORT', 587),
+      secure: false,
+      requireTLS: true,
+      auth: baseAuth,
+      tls: baseTls,
+      pool: false, // Désactiver le pooling pour éviter les problèmes de connexion
+      connectionTimeout: 120000, // 2 minutes
+      greetingTimeout: 60000,    // 1 minute
+      socketTimeout: 90000,      // 1.5 minute
+      maxConnections: 1,
+      maxMessages: 1,
+    };
+
+    // Configuration 2: Port 465 avec SSL direct
+    const config2 = {
+      host: this.configService.get<string>('EMAIL_HOST', 'smtp.gmail.com'),
+      port: 465,
+      secure: true,
+      auth: baseAuth,
+      tls: baseTls,
+      pool: false,
+      connectionTimeout: 120000,
+      greetingTimeout: 60000,
+      socketTimeout: 90000,
+      maxConnections: 1,
+      maxMessages: 1,
+    };
+
+    // Configuration 3: Configuration minimale (fallback)
+    const config3 = {
+      host: this.configService.get<string>('EMAIL_HOST', 'smtp.gmail.com'),
+      port: this.configService.get<number>('EMAIL_PORT', 587),
+      secure: false,
+      auth: baseAuth,
+      pool: false,
+      connectionTimeout: 180000, // 3 minutes
+      socketTimeout: 120000,     // 2 minutes
+    };
+
+    return [config1, config2, config3];
+  }
+
+  private createMailtrapTransporter() {
+    this.logger.log('📧 Configuration Mailtrap SMTP (Développement)');
+    this.transporter = nodemailer.createTransport({
+      host: this.configService.get<string>('MAILTRAP_HOST', 'sandbox.smtp.mailtrap.io'),
+      port: this.configService.get<number>('MAILTRAP_PORT', 2525),
+      auth: {
+        user: this.configService.get<string>('MAILTRAP_USER'),
+        pass: this.configService.get<string>('MAILTRAP_PASSWORD'),
+      },
+    });
+    
+    // Garder les délais stricts pour Mailtrap
+    this.minDelayBetweenEmails = this.configService.get<number>('MIN_EMAIL_DELAY', 3000);
+    
+    this.verifyConnection('Mailtrap');
+  }
+
+  private verifyConnection(providerName: string) {
+    // Timeout plus long pour la vérification initiale
+    const verifyTimeout = providerName === 'Gmail' ? 45000 : 15000; // 45s pour Gmail, 15s pour Mailtrap
     
     const verifyPromise = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -86,21 +137,21 @@ export class EmailService {
 
     verifyPromise
       .then(() => {
-        this.logger.log(`✅ Serveur email prêt (${useGmail ? 'Gmail' : 'Mailtrap'}) - Délai: ${this.minDelayBetweenEmails}ms`);
-        if (useGmail) {
+        this.logger.log(`✅ Serveur email prêt (${providerName}) - Délai: ${this.minDelayBetweenEmails}ms`);
+        if (providerName === 'Gmail') {
           this.logger.log(`📧 Configuration Gmail: ${this.configService.get<string>('EMAIL_USER')} via port ${this.configService.get<number>('EMAIL_PORT', 587)}`);
         }
       })
       .catch((error) => {
-        if (useGmail && (error.message.includes('timeout') || error.message.includes('connection'))) {
+        if (providerName === 'Gmail' && (error.message.includes('timeout') || error.message.includes('connection'))) {
           // En production, on continue même si la vérification échoue
-          this.logger.warn(`⚠️ Vérification email échouée mais service actif (${useGmail ? 'Gmail' : 'Mailtrap'}): ${error.message}`);
+          this.logger.warn(`⚠️ Vérification email échouée mais service actif (${providerName}): ${error.message}`);
           this.logger.warn('🔧 Le service email fonctionnera probablement malgré cette erreur de vérification');
         } else {
-          this.logger.error(`❌ Erreur de configuration email (${useGmail ? 'Gmail' : 'Mailtrap'}):`, error.message);
+          this.logger.error(`❌ Erreur de configuration email (${providerName}):`, error.message);
           
           // Aide au diagnostic selon le type d'erreur
-          if (useGmail) {
+          if (providerName === 'Gmail') {
             if (error.message.includes('SSL') || error.message.includes('TLS')) {
               this.logger.error('💡 Conseil: Vérifiez la configuration SSL/TLS de Gmail');
               this.logger.error('   - Port 587 avec STARTTLS (secure: false)');
@@ -151,7 +202,13 @@ export class EmailService {
           this.logger.warn(`⚠️ Tentative ${attempt}/${maxRetries} échouée (timeout): ${errorMessage}`);
           
           if (attempt < maxRetries) {
-            const retryDelay = attempt * 2000; // Délai progressif: 2s, 4s, 6s
+            // Essayer une configuration alternative de Gmail si disponible
+            if (attempt === 2 && this.isGmailEnvironment()) {
+              this.logger.log('🔄 Tentative avec configuration Gmail alternative (port 465)...');
+              await this.tryAlternativeGmailConfig();
+            }
+            
+            const retryDelay = attempt * 3000; // Délai progressif plus long: 3s, 6s, 9s
             this.logger.log(`🔄 Nouvelle tentative dans ${retryDelay}ms...`);
             await new Promise(resolve => setTimeout(resolve, retryDelay));
           }
@@ -163,6 +220,23 @@ export class EmailService {
     }
     
     throw lastError;
+  }
+
+  private isGmailEnvironment(): boolean {
+    const nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
+    return nodeEnv === 'production' || this.configService.get<string>('EMAIL_PROVIDER') === 'gmail';
+  }
+
+  private async tryAlternativeGmailConfig(): Promise<void> {
+    try {
+      const gmailConfigs = this.getGmailConfigurations();
+      // Utiliser la configuration 2 (port 465)
+      const alternativeConfig = gmailConfigs[1];
+      this.logger.log(`🔧 Basculement vers port ${alternativeConfig.port} avec SSL direct`);
+      this.transporter = nodemailer.createTransport(alternativeConfig);
+    } catch (error) {
+      this.logger.warn('⚠️ Impossible de basculer vers la configuration alternative');
+    }
   }
 
   async sendContactReply(

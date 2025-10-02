@@ -15,47 +15,129 @@ export class ContactService {
   ) {}
 
   async create(createDto: CreateContactMessageDto) {
+    // 1. Créer le message immédiatement
     const message = await this.prisma.contactMessage.create({
       data: createDto,
     });
 
-    // Envoyer email de confirmation à l'utilisateur
-    try {
-      await this.emailService.sendContactConfirmation(
-        createDto.email,
-        createDto.name,
-        createDto.subject,
-        createDto.message,
-      );
-    } catch (error) {
-      console.error('Erreur envoi email de confirmation:', error);
-      // Ne pas faire échouer la création du message si l'email échoue
+    // 2. Lancer l'envoi des emails en arrière-plan (asynchrone)
+    this.sendEmailsInBackground(createDto, message.id);
+
+    // 3. Retourner immédiatement la réponse au frontend (< 3 secondes)
+    return {
+      ...message,
+      emailStatus: 'en_cours',
+      message: 'Message enregistré. Les emails de confirmation sont en cours d\'envoi.'
+    };
+  }
+
+  private sendEmailsInBackground(createDto: CreateContactMessageDto, messageId: string) {
+    // Exécuter de manière asynchrone sans bloquer la réponse
+    setImmediate(async () => {
+      console.log(`📧 Début envoi emails en arrière-plan pour message ${messageId}`);
+      
+      // Envoyer email de confirmation à l'utilisateur
+      await this.sendConfirmationEmailWithRetry(createDto, messageId);
+      
+      // Attendre un délai avant d'envoyer la notification admin
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Envoyer notification à l'admin si activée
+      await this.sendAdminNotificationWithRetry(createDto, messageId);
+      
+      console.log(`✅ Envoi emails terminé pour message ${messageId}`);
+    });
+  }
+
+  private async sendConfirmationEmailWithRetry(createDto: CreateContactMessageDto, messageId: string) {
+    const maxAttempts = 5; // Plus d'essais car on a le temps
+    let attempt = 1;
+
+    while (attempt <= maxAttempts) {
+      try {
+        console.log(`📧 Tentative ${attempt}/${maxAttempts} - Email confirmation pour ${createDto.email}`);
+        
+        await this.emailService.sendContactConfirmation(
+          createDto.email,
+          createDto.name,
+          createDto.subject,
+          createDto.message,
+        );
+        
+        console.log(`✅ Email confirmation envoyé avec succès (tentative ${attempt})`);
+        
+        // Mettre à jour le statut en base si nécessaire
+        await this.updateEmailStatus(messageId, 'confirmation_sent');
+        return;
+        
+      } catch (error) {
+        console.error(`❌ Tentative ${attempt}/${maxAttempts} échouée:`, (error as any)?.message || 'Erreur inconnue');
+        
+        if (attempt < maxAttempts) {
+          const waitTime = attempt * 5000; // 5s, 10s, 15s, 20s
+          console.log(`⏳ Attente ${waitTime}ms avant nouvelle tentative...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+        
+        attempt++;
+      }
     }
+    
+    console.error(`💥 Échec définitif envoi email confirmation après ${maxAttempts} tentatives`);
+  }
 
-    // Attendre 5 secondes avant d'envoyer la notification admin (limite Mailtrap stricte)
-    await new Promise(resolve => setTimeout(resolve, 5000));
-
-    // Envoyer notification à l'admin (peut être désactivé via variable d'environnement)
+  private async sendAdminNotificationWithRetry(createDto: CreateContactMessageDto, messageId: string) {
     const sendAdminNotifications = process.env.SEND_ADMIN_NOTIFICATIONS !== 'false';
     
-    if (sendAdminNotifications) {
+    if (!sendAdminNotifications) {
+      console.log('ℹ️ Notifications admin désactivées (SEND_ADMIN_NOTIFICATIONS=false)');
+      return;
+    }
+
+    const maxAttempts = 5;
+    let attempt = 1;
+
+    while (attempt <= maxAttempts) {
       try {
+        console.log(`📧 Tentative ${attempt}/${maxAttempts} - Notification admin`);
+        
         await this.emailService.sendAdminNotification(
           createDto.name,
           createDto.email,
           createDto.subject,
           createDto.message,
         );
+        
+        console.log(`✅ Notification admin envoyée avec succès (tentative ${attempt})`);
+        
+        // Mettre à jour le statut en base
+        await this.updateEmailStatus(messageId, 'admin_notified');
+        return;
+        
       } catch (error) {
-        console.error('Erreur envoi notification admin:', error);
-        console.log('💡 Conseil: Ajoutez SEND_ADMIN_NOTIFICATIONS=false dans .env pour désactiver temporairement');
-        // Ne pas faire échouer la création du message si l'email échoue
+        console.error(`❌ Tentative ${attempt}/${maxAttempts} échouée (admin):`, (error as any)?.message || 'Erreur inconnue');
+        
+        if (attempt < maxAttempts) {
+          const waitTime = attempt * 5000; // 5s, 10s, 15s, 20s
+          console.log(`⏳ Attente ${waitTime}ms avant nouvelle tentative...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+        
+        attempt++;
       }
-    } else {
-      console.log('ℹ️ Notifications admin désactivées (SEND_ADMIN_NOTIFICATIONS=false)');
     }
+    
+    console.error(`💥 Échec définitif notification admin après ${maxAttempts} tentatives`);
+  }
 
-    return message;
+  private async updateEmailStatus(messageId: string, status: string) {
+    try {
+      // Optionnel: ajouter un champ emailStatus dans votre base de données
+      // Pour l'instant, on log juste le statut
+      console.log(`📊 Statut email pour message ${messageId}: ${status}`);
+    } catch (error) {
+      console.error('Erreur mise à jour statut email:', error);
+    }
   }
 
   async findAll(page: number = 1, limit: number = 10, filter?: 'unread' | 'replied' | 'all') {
@@ -176,21 +258,54 @@ export class ContactService {
       },
     });
 
-    // Envoyer la réponse par email à l'utilisateur
-    try {
-      await this.emailService.sendContactReply(
-        message.email,
-        message.name,
-        message.subject,
-        message.message,
-        replyDto.reply,
-      );
-    } catch (error) {
-      console.error('Erreur envoi email de réponse:', error);
-      // Ne pas faire échouer la réponse si l'email échoue
-    }
+    // Envoyer la réponse par email en arrière-plan
+    this.sendReplyEmailInBackground(message, replyDto.reply);
 
-    return updatedMessage;
+    return {
+      ...updatedMessage,
+      emailStatus: 'en_cours',
+      message: 'Réponse enregistrée. L\'email de réponse est en cours d\'envoi.'
+    };
+  }
+
+  private sendReplyEmailInBackground(originalMessage: any, replyContent: string) {
+    setImmediate(async () => {
+      console.log(`📧 Début envoi réponse email en arrière-plan pour message ${originalMessage.id}`);
+      
+      const maxAttempts = 5;
+      let attempt = 1;
+
+      while (attempt <= maxAttempts) {
+        try {
+          console.log(`📧 Tentative ${attempt}/${maxAttempts} - Email réponse pour ${originalMessage.email}`);
+          
+          await this.emailService.sendContactReply(
+            originalMessage.email,
+            originalMessage.name,
+            originalMessage.subject,
+            originalMessage.message,
+            replyContent,
+          );
+          
+          console.log(`✅ Email réponse envoyé avec succès (tentative ${attempt})`);
+          await this.updateEmailStatus(originalMessage.id, 'reply_sent');
+          return;
+          
+        } catch (error) {
+          console.error(`❌ Tentative ${attempt}/${maxAttempts} échouée (réponse):`, (error as any)?.message || 'Erreur inconnue');
+          
+          if (attempt < maxAttempts) {
+            const waitTime = attempt * 5000; // 5s, 10s, 15s, 20s
+            console.log(`⏳ Attente ${waitTime}ms avant nouvelle tentative...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+          }
+          
+          attempt++;
+        }
+      }
+      
+      console.error(`💥 Échec définitif envoi email réponse après ${maxAttempts} tentatives`);
+    });
   }
 
   async delete(id: string) {
