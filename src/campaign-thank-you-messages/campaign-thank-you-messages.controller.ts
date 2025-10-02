@@ -163,3 +163,4 @@ export class CampaignThankYouMessagesController {
     return this.campaignThankYouMessagesService.setActive(id, userId);
   }
 }
+

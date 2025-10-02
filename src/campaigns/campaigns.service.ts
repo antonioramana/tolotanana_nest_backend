@@ -621,4 +621,94 @@ export class CampaignsService {
       campaign: updatedCampaign,
     };
   }
+
+  async recalculateCampaignAmount(campaignId: string) {
+    // Vérifier que la campagne existe
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+    });
+
+    if (!campaign) {
+      throw new NotFoundException('Campagne non trouvée');
+    }
+
+    // Calculer le montant réel basé sur les dons "completed"
+    const completedDonations = await this.prisma.donation.findMany({
+      where: {
+        campaignId,
+        status: 'completed',
+      },
+      select: {
+        amount: true,
+      },
+    });
+
+    const realAmount = completedDonations.reduce((sum, donation) => {
+      return sum + Number(donation.amount);
+    }, 0);
+
+    // Mettre à jour le montant
+    const updatedCampaign = await this.prisma.campaign.update({
+      where: { id: campaignId },
+      data: {
+        currentAmount: realAmount,
+      },
+      include: {
+        category: true,
+        creator: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            avatar: true,
+          },
+        },
+      },
+    });
+
+    return {
+      message: 'Montant collecté recalculé avec succès',
+      campaign: updatedCampaign,
+      previousAmount: Number(campaign.currentAmount),
+      newAmount: realAmount,
+      difference: realAmount - Number(campaign.currentAmount),
+    };
+  }
+
+  async recalculateAllCampaignAmounts() {
+    const campaigns = await this.prisma.campaign.findMany({
+      select: {
+        id: true,
+        title: true,
+        currentAmount: true,
+      },
+    });
+
+    const results = [];
+
+    for (const campaign of campaigns) {
+      try {
+        const result = await this.recalculateCampaignAmount(campaign.id);
+        results.push({
+          campaignId: campaign.id,
+          title: campaign.title,
+          success: true,
+          ...result,
+        });
+      } catch (error: any) {
+        results.push({
+          campaignId: campaign.id,
+          title: campaign.title,
+          success: false,
+          error: error.message,
+        });
+      }
+    }
+
+    return {
+      message: 'Recalcul terminé',
+      totalCampaigns: campaigns.length,
+      results,
+    };
+  }
 }

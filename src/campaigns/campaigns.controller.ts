@@ -254,6 +254,32 @@ export class CampaignsController {
     return this.campaignsService.updateThankYouMessage(campaignId, updateThankYouMessageDto, userId);
   }
 
+  @Post(':id/recalculate-amount')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Recalculer le montant collecté d\'une campagne (Admin seulement)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Montant recalculé avec succès',
+  })
+  async recalculateCampaignAmount(@Param('id') campaignId: string) {
+    return this.campaignsService.recalculateCampaignAmount(campaignId);
+  }
+
+  @Post('recalculate-all-amounts')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Recalculer les montants collectés de toutes les campagnes (Admin seulement)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Montants recalculés avec succès',
+  })
+  async recalculateAllCampaignAmounts() {
+    return this.campaignsService.recalculateAllCampaignAmounts();
+  }
+
   @Delete(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')

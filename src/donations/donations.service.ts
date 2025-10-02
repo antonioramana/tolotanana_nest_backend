@@ -264,13 +264,51 @@ export class DonationsService {
         },
       });
 
-      // Envoyer automatiquement un message de remerciement si le statut passe à "completed"
+      // Mettre à jour le montant collecté de la campagne si le statut passe à "completed"
       if (updateDonationDto.status === 'completed' && currentDonation.status !== 'completed') {
+        try {
+          // Incrémenter le montant collecté de la campagne
+          await this.prisma.campaign.update({
+            where: { id: currentDonation.campaignId },
+            data: {
+              currentAmount: {
+                increment: Number(currentDonation.amount),
+              },
+            },
+          });
+
+          console.log(`Montant collecté mis à jour pour la campagne ${currentDonation.campaignId}: +${currentDonation.amount} Ar`);
+        } catch (error) {
+          console.error('Erreur lors de la mise à jour du montant collecté:', error);
+          // Ne pas faire échouer la mise à jour de la donation si la mise à jour du montant échoue
+        }
+
+        // Envoyer automatiquement un message de remerciement
         try {
           await this.sendAutomaticThankYouMessage(donation);
         } catch (error) {
           console.error('Erreur lors de l\'envoi automatique du message de remerciement:', error);
           // Ne pas faire échouer la mise à jour de la donation si l'envoi du message échoue
+        }
+      }
+
+      // Gérer le cas où un don "completed" est annulé (passe à "failed" ou "pending")
+      if (updateDonationDto.status !== 'completed' && currentDonation.status === 'completed') {
+        try {
+          // Décrémenter le montant collecté de la campagne
+          await this.prisma.campaign.update({
+            where: { id: currentDonation.campaignId },
+            data: {
+              currentAmount: {
+                decrement: Number(currentDonation.amount),
+              },
+            },
+          });
+
+          console.log(`Montant collecté mis à jour pour la campagne ${currentDonation.campaignId}: -${currentDonation.amount} Ar (don annulé)`);
+        } catch (error) {
+          console.error('Erreur lors de la mise à jour du montant collecté (annulation):', error);
+          // Ne pas faire échouer la mise à jour de la donation si la mise à jour du montant échoue
         }
       }
 

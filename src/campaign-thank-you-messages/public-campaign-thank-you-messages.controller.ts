@@ -31,3 +31,4 @@ export class PublicCampaignThankYouMessagesController {
     return this.campaignThankYouMessagesService.getActiveMessage(campaignId);
   }
 }
+

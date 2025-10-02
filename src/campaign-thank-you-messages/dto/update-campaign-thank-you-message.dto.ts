@@ -20,3 +20,4 @@ export class UpdateCampaignThankYouMessageDto {
   @IsOptional()
   isActive?: boolean;
 }
+

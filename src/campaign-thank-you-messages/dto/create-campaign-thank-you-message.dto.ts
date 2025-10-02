@@ -20,3 +20,4 @@ export class CreateCampaignThankYouMessageDto {
   @MaxLength(500, { message: 'Le message ne peut pas dépasser 500 caractères' })
   message: string;
 }
+
