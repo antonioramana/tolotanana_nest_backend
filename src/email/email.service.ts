@@ -23,7 +23,6 @@ export class EmailService {
       const gmailPort = this.configService.get<number>('EMAIL_PORT', 587);
       
       this.transporter = nodemailer.createTransport({
-        service: 'gmail', // Utilise la configuration prédéfinie de Gmail
         host: this.configService.get<string>('EMAIL_HOST', 'smtp.gmail.com'),
         port: gmailPort,
         secure: gmailPort === 465, // true pour port 465, false pour port 587
@@ -33,21 +32,21 @@ export class EmailService {
           pass: this.configService.get<string>('EMAIL_PASSWORD'),
         },
         tls: {
-          // Configuration TLS plus permissive pour les serveurs de production
+          // Configuration TLS robuste pour les serveurs de production
           rejectUnauthorized: false,
           ciphers: 'SSLv3',
-          minVersion: 'TLSv1'
+          minVersion: 'TLSv1.2'
         },
-        // Timeout settings plus courts pour les environnements de production
-        connectionTimeout: 20000, // 20 secondes (réduit)
-        greetingTimeout: 15000,   // 15 secondes (réduit)
-        socketTimeout: 25000,     // 25 secondes (réduit)
+        // Timeout settings optimisés pour la stabilité en production
+        connectionTimeout: 60000, // 60 secondes (plus tolérant)
+        greetingTimeout: 30000,   // 30 secondes (plus tolérant)
+        socketTimeout: 45000,     // 45 secondes (plus tolérant)
         // Configuration pour les environnements restrictifs
         pool: true,
         maxConnections: 5,
         maxMessages: 10,
         rateLimit: 14 // 14 emails par seconde max
-      });
+      } as nodemailer.TransportOptions);
       
       // Ajuster les délais pour Gmail (moins strict que Mailtrap)
       this.minDelayBetweenEmails = this.configService.get<number>('MIN_EMAIL_DELAY', 1000); // 1 seconde pour Gmail
@@ -67,8 +66,8 @@ export class EmailService {
       this.minDelayBetweenEmails = this.configService.get<number>('MIN_EMAIL_DELAY', 3000); // 3 secondes pour Mailtrap
     }
 
-    // Vérifier la connexion avec timeout plus court en production
-    const verifyTimeout = useGmail ? 10000 : 5000; // 10s pour Gmail, 5s pour Mailtrap
+    // Vérifier la connexion avec timeout optimisé pour la stabilité
+    const verifyTimeout = useGmail ? 30000 : 10000; // 30s pour Gmail, 10s pour Mailtrap
     
     const verifyPromise = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -131,6 +130,41 @@ export class EmailService {
     this.lastEmailTime = Date.now();
   }
 
+  private async sendMailWithRetry(mailOptions: any, maxRetries: number = 3): Promise<any> {
+    let lastError;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await this.waitForRateLimit();
+        const result = await this.transporter.sendMail(mailOptions);
+        if (attempt > 1) {
+          this.logger.log(`✅ Email envoyé avec succès après ${attempt} tentatives`);
+        }
+        return result;
+      } catch (error) {
+        lastError = error;
+        
+        const errorCode = (error as any)?.code;
+        const errorMessage = (error as any)?.message || 'Unknown error';
+        
+        if (errorCode === 'ETIMEDOUT' || errorMessage.includes('timeout') || errorMessage.includes('connection')) {
+          this.logger.warn(`⚠️ Tentative ${attempt}/${maxRetries} échouée (timeout): ${errorMessage}`);
+          
+          if (attempt < maxRetries) {
+            const retryDelay = attempt * 2000; // Délai progressif: 2s, 4s, 6s
+            this.logger.log(`🔄 Nouvelle tentative dans ${retryDelay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+          }
+        } else {
+          // Pour les autres erreurs (auth, etc.), on ne retry pas
+          throw error;
+        }
+      }
+    }
+    
+    throw lastError;
+  }
+
   async sendContactReply(
     userEmail: string,
     userName: string,
@@ -149,8 +183,7 @@ export class EmailService {
     };
 
     try {
-      await this.waitForRateLimit();
-      const result = await this.transporter.sendMail(mailOptions);
+      const result = await this.sendMailWithRetry(mailOptions);
       this.logger.log(`Email de réponse envoyé à ${userEmail}`);
       return result;
     } catch (error) {
@@ -176,8 +209,7 @@ export class EmailService {
     };
 
     try {
-      await this.waitForRateLimit();
-      const result = await this.transporter.sendMail(mailOptions);
+      const result = await this.sendMailWithRetry(mailOptions);
       this.logger.log(`Email de confirmation envoyé à ${userEmail}`);
       return result;
     } catch (error) {
@@ -206,8 +238,7 @@ export class EmailService {
     };
 
     try {
-      await this.waitForRateLimit();
-      const result = await this.transporter.sendMail(mailOptions);
+      const result = await this.sendMailWithRetry(mailOptions);
       this.logger.log(`Notification admin envoyée`);
       return result;
     } catch (error) {
