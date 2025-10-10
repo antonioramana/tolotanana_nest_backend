@@ -19,6 +19,7 @@ import { ContactModule } from './contact/contact.module';
 import { EmailModule } from './email/email.module';
 import { TestimonialsModule } from './testimonials/testimonials.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 
@@ -48,6 +49,7 @@ import { join } from 'path';
     EmailModule,
     TestimonialsModule,
     DashboardModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

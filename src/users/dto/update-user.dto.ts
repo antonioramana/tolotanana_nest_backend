@@ -2,8 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsString,
   IsOptional,
-  IsPhoneNumber,
-  IsUrl,
+  Matches,
 } from 'class-validator';
 
 export class UpdateUserDto {
@@ -24,10 +23,10 @@ export class UpdateUserDto {
   lastName?: string;
 
   @ApiPropertyOptional({
-    description: 'URL de l\'avatar de l\'utilisateur',
-    example: 'https://example.com/avatar.jpg',
+    description: 'Chemin ou URL de l\'avatar de l\'utilisateur',
+    example: '/uploads/mon-avatar.jpg',
   })
-  @IsUrl({}, { message: 'Veuillez fournir une URL d\'avatar valide' })
+  @IsString()
   @IsOptional()
   avatar?: string;
 
@@ -35,7 +34,8 @@ export class UpdateUserDto {
     description: 'Numéro de téléphone',
     example: '+33123456789',
   })
-  @IsPhoneNumber('FR', { message: 'Veuillez fournir un numéro de téléphone valide' })
+  @Matches(/^\+?\d{10,20}$/,
+    { message: 'Le numéro de téléphone doit contenir 10 à 20 chiffres (optionnellement précédé de +)' })
   @IsOptional()
   phone?: string;
 }

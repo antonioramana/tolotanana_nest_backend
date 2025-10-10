@@ -5,6 +5,9 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { EmailService } from '../email/email.service';
+import * as bcrypt from 'bcryptjs';
 import { CreateWithdrawalRequestDto } from './dto/create-withdrawal-request.dto';
 import { UpdateWithdrawalRequestDto } from './dto/update-withdrawal-request.dto';
 import { WithdrawalRequestFilterDto } from './dto/withdrawal-request-filter.dto';
@@ -13,10 +16,22 @@ import { UpdateWithdrawalStatusDto } from './dto/update-withdrawal-status.dto';
 
 @Injectable()
 export class WithdrawalRequestsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notificationsService: NotificationsService,
+    private emailService: EmailService,
+  ) {}
 
   async create(createWithdrawalRequestDto: CreateWithdrawalRequestDto, userId: string) {
-    const { campaignId, amount, bankInfoId, justification, documents } = createWithdrawalRequestDto;
+    const { campaignId, amount, bankInfoId, justification, documents, password } = createWithdrawalRequestDto;
+
+    // Vérifier le mot de passe de l'utilisateur
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Utilisateur non trouvé');
+    const ok = await bcrypt.compare(password, user.password);
+    if (!ok) {
+      throw new ForbiddenException('Mot de passe incorrect');
+    }
 
     // Vérifier que la campagne appartient à l'utilisateur
     const campaign = await this.prisma.campaign.findUnique({
@@ -45,7 +60,7 @@ export class WithdrawalRequestsService {
       throw new ForbiddenException('Informations bancaires non valides');
     }
 
-    return this.prisma.withdrawalRequest.create({
+    const created = await this.prisma.withdrawalRequest.create({
       data: {
         campaignId,
         requestedBy: userId,
@@ -72,6 +87,40 @@ export class WithdrawalRequestsService {
         },
       },
     });
+
+    const requesterFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+
+    // Notifier les admins d'une nouvelle demande
+    const admins = await this.prisma.user.findMany({ where: { role: 'admin' }, select: { id: true } });
+    const adminIds = admins.map(a => a.id);
+    if (adminIds.length > 0) {
+      await this.notificationsService.sendWithdrawalRequestNotification(adminIds, {
+        id: created.id,
+        userId,
+        amount,
+        userName: requesterFullName,
+      });
+    }
+
+    // Notification à l'utilisateur: demande en cours
+    await this.notificationsService.createNotification({
+      userId,
+      title: 'Demande de retrait reçue',
+      message: `Votre demande de retrait de ${amount} Ar est en cours de traitement (24–48h).`,
+      type: 'info',
+    });
+
+    // Email de confirmation à l'utilisateur
+    try {
+      await (this.emailService as any).sendMailWithRetry({
+        from: { name: 'TOLOTANANA', address: process.env.EMAIL_FROM || 'support@tolotanana.com' },
+        to: user.email,
+        subject: 'Demande de retrait reçue',
+        html: `<p>Votre demande de retrait de <strong>${amount} Ar</strong> a été reçue et sera traitée sous 24 à 48h.</p>`,
+      });
+    } catch {}
+
+    return created;
   }
 
   async findAll(filters: WithdrawalRequestFilterDto, pagination: PaginationDto) {
@@ -225,6 +274,7 @@ export class WithdrawalRequestsService {
           select: {
             id: true,
             title: true,
+            currentAmount: true,
           },
         },
         bankInfo: true,
@@ -254,8 +304,46 @@ export class WithdrawalRequestsService {
           currentAmount: {
             decrement: Number(request.amount),
           },
+          totalRaised: {
+            increment: Number(request.amount), // Ajouter au montant total collecté
+          },
         },
       });
+
+      const newCampaignState = await this.prisma.campaign.findUnique({
+        where: { id: request.campaignId },
+        select: { currentAmount: true, totalRaised: true },
+      });
+
+      // Notification + email approuvé
+      await this.notificationsService.sendWithdrawalApprovedNotification(request.requestedBy, {
+        id: updatedRequest.id,
+        amount: request.amount,
+      });
+      try {
+        await (this.emailService as any).sendMailWithRetry({
+          from: { name: 'TOLOTANANA', address: process.env.EMAIL_FROM || 'support@tolotanana.com' },
+          to: updatedRequest.requester.email,
+          subject: 'Demande de retrait approuvée',
+          html: `<p>Votre demande de retrait de <strong>${request.amount} Ar</strong> a été approuvée.</p><p>Montant restant sur la campagne: <strong>${Number(newCampaignState?.currentAmount || 0)} Ar</strong></p>`,
+        });
+      } catch {}
+    }
+    if (status === 'rejected') {
+      // Notification + email rejeté
+      await this.notificationsService.sendWithdrawalRejectedNotification(request.requestedBy, {
+        id: updatedRequest.id,
+        amount: request.amount,
+        reason: notes,
+      });
+      try {
+        await (this.emailService as any).sendMailWithRetry({
+          from: { name: 'TOLOTANANA', address: process.env.EMAIL_FROM || 'support@tolotanana.com' },
+          to: updatedRequest.requester.email,
+          subject: 'Demande de retrait rejetée',
+          html: `<p>Votre demande de retrait de <strong>${request.amount} Ar</strong> a été rejetée.<br/>Raison: ${notes || '—'}</p>`,
+        });
+      } catch {}
     }
 
     return updatedRequest;

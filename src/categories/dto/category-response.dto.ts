@@ -7,6 +7,9 @@ export class CategoryResponseDto {
   @ApiProperty()
   name: string;
 
+  @ApiProperty({ required: false })
+  description?: string;
+
   @ApiProperty()
   createdAt: Date;
 

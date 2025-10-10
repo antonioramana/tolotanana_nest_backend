@@ -280,6 +280,32 @@ export class CampaignsController {
     return this.campaignsService.recalculateAllCampaignAmounts();
   }
 
+  @Post(':id/recalculate-total-raised')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Recalculer le montant total collecté d\'une campagne (actuel + retraits) (Admin seulement)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Montant total collecté recalculé avec succès',
+  })
+  async recalculateCampaignTotalRaised(@Param('id') campaignId: string) {
+    return this.campaignsService.recalculateCampaignTotalRaised(campaignId);
+  }
+
+  @Post('recalculate-all-total-raised')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Recalculer le montant total collecté de toutes les campagnes (Admin seulement)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Montants totaux collectés recalculés avec succès',
+  })
+  async recalculateAllCampaignTotalRaised() {
+    return this.campaignsService.recalculateAllCampaignTotalRaised();
+  }
+
   @Delete(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')

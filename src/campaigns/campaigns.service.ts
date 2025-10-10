@@ -4,6 +4,8 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { EmailService } from '../email/email.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { CampaignFilterDto } from './dto/campaign-filter.dto';
@@ -14,7 +16,11 @@ import { UpdateThankYouMessageDto } from './dto/update-thank-you-message.dto';
 
 @Injectable()
 export class CampaignsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notificationsService: NotificationsService,
+    private emailService: EmailService,
+  ) {}
 
   // Fonctions utilitaires pour gérer le message de remerciement dans la description
   private extractThankYouMessage(description: string): string | null {
@@ -33,7 +39,7 @@ export class CampaignsService {
   }
 
   async create(createCampaignDto: CreateCampaignDto, userId: string) {
-    return this.prisma.campaign.create({
+    const created = await this.prisma.campaign.create({
       data: {
         ...createCampaignDto,
         createdBy: userId,
@@ -46,10 +52,54 @@ export class CampaignsService {
             firstName: true,
             lastName: true,
             avatar: true,
+            email: true,
           },
         },
       },
     });
+
+    // Notifier les admins d'une nouvelle campagne
+    const admins = await this.prisma.user.findMany({ where: { role: 'admin' }, select: { id: true, email: true, firstName: true } });
+    const adminIds = admins.map(a => a.id);
+    if (adminIds.length > 0) {
+      await this.notificationsService.sendSystemNotification(adminIds, 'Nouvelle campagne créée', `La campagne "${created.title}" a été créée et nécessite une validation.`, 'info');
+    }
+    
+    // Envoyer email aux admins
+    try {
+      const adminEmail = process.env.ADMIN_EMAIL;
+      if (adminEmail) {
+        await (this.emailService as any).sendMailWithRetry({
+          from: { name: 'TOLOTANANA', address: process.env.EMAIL_FROM || 'support@tolotanana.com' },
+          to: adminEmail,
+          subject: 'Nouvelle campagne créée',
+          html: `<p>La campagne <strong>${created.title}</strong> vient d'être créée et attend validation.</p>`,
+        });
+      }
+    } catch {}
+
+    // Notifier le créateur de la campagne
+    await this.notificationsService.createNotification({
+      userId: created.createdBy,
+      title: 'Campagne créée avec succès',
+      message: `Votre campagne "${created.title}" a été créée et est en attente de validation.`,
+      type: 'success',
+      data: { campaignId: created.id },
+    });
+
+    // Envoyer email au créateur
+    try {
+      if (created.creator.email) {
+        await (this.emailService as any).sendMailWithRetry({
+          from: { name: 'TOLOTANANA', address: process.env.EMAIL_FROM || 'support@tolotanana.com' },
+          to: created.creator.email,
+          subject: 'Campagne créée avec succès',
+          html: `<p>Bonjour ${created.creator.firstName || ''},<br/>Votre campagne <strong>${created.title}</strong> a été créée avec succès et est en attente de validation par nos équipes.</p>`,
+        });
+      }
+    } catch {}
+
+    return created;
   }
 
   async findAll(filters: CampaignFilterDto, pagination: PaginationDto) {
@@ -334,10 +384,37 @@ export class CampaignsService {
     if (!campaign) {
       throw new NotFoundException('Campagne non trouvée');
     }
-    return this.prisma.campaign.update({
+    const updated = await this.prisma.campaign.update({
       where: { id },
       data: { status: updateStatusDto.status },
     });
+
+    // Notifier le propriétaire lors de l'activation
+    if (updateStatusDto.status === 'active') {
+      // Notification système au propriétaire
+      await this.notificationsService.createNotification({
+        userId: campaign.createdBy,
+        title: 'Campagne activée',
+        message: `Votre campagne "${campaign.title}" a été activée.`,
+        type: 'success',
+        data: { campaignId: campaign.id },
+      });
+      
+      // Email au propriétaire
+      try {
+        const owner = await this.prisma.user.findUnique({ where: { id: campaign.createdBy }, select: { email: true, firstName: true } });
+        if (owner?.email) {
+          await (this.emailService as any).sendMailWithRetry({
+            from: { name: 'TOLOTANANA', address: process.env.EMAIL_FROM || 'support@tolotanana.com' },
+            to: owner.email,
+            subject: 'Votre campagne a été activée',
+            html: `<p>Bonjour ${owner.firstName || ''},<br/>Votre campagne <strong>${campaign.title}</strong> est maintenant active.</p>`,
+          });
+        }
+      } catch {}
+    }
+
+    return updated;
   }
 
   async remove(id: string, userId: string) {
@@ -707,6 +784,101 @@ export class CampaignsService {
 
     return {
       message: 'Recalcul terminé',
+      totalCampaigns: campaigns.length,
+      results,
+    };
+  }
+
+  async recalculateCampaignTotalRaised(campaignId: string) {
+    // Vérifier que la campagne existe
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+    });
+
+    if (!campaign) {
+      throw new NotFoundException('Campagne non trouvée');
+    }
+
+    // Calculer le montant total des retraits approuvés
+    const approvedWithdrawals = await this.prisma.withdrawalRequest.findMany({
+      where: {
+        campaignId,
+        status: 'approved',
+      },
+      select: {
+        amount: true,
+      },
+    });
+
+    const totalWithdrawals = approvedWithdrawals.reduce((sum, withdrawal) => {
+      return sum + Number(withdrawal.amount);
+    }, 0);
+
+    // Calculer le montant total collecté (actuel + retraits)
+    const totalRaised = Number(campaign.currentAmount) + totalWithdrawals;
+
+    // Mettre à jour le montant total collecté
+    const updatedCampaign = await this.prisma.campaign.update({
+      where: { id: campaignId },
+      data: {
+        totalRaised: totalRaised,
+      },
+      include: {
+        category: true,
+        creator: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            avatar: true,
+          },
+        },
+      },
+    });
+
+    return {
+      message: 'Montant total collecté recalculé avec succès',
+      campaign: updatedCampaign,
+      previousTotalRaised: Number(campaign.totalRaised || 0),
+      newTotalRaised: totalRaised,
+      currentAmount: Number(campaign.currentAmount),
+      totalWithdrawals: totalWithdrawals,
+      difference: totalRaised - Number(campaign.totalRaised || 0),
+    };
+  }
+
+  async recalculateAllCampaignTotalRaised() {
+    const campaigns = await this.prisma.campaign.findMany({
+      select: {
+        id: true,
+        title: true,
+        totalRaised: true,
+      },
+    });
+
+    const results = [];
+
+    for (const campaign of campaigns) {
+      try {
+        const result = await this.recalculateCampaignTotalRaised(campaign.id);
+        results.push({
+          campaignId: campaign.id,
+          title: campaign.title,
+          success: true,
+          ...result,
+        });
+      } catch (error: any) {
+        results.push({
+          campaignId: campaign.id,
+          title: campaign.title,
+          success: false,
+          error: error.message,
+        });
+      }
+    }
+
+    return {
+      message: 'Recalcul du montant total collecté terminé',
       totalCampaigns: campaigns.length,
       results,
     };

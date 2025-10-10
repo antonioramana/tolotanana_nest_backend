@@ -10,6 +10,8 @@ import { DonationFilterDto } from './dto/donation-filter.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { ThankYouMessagesService } from '../thank-you-messages/thank-you-messages.service';
 import { PlatformFeesService } from '../platform-fees/platform-fees.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class DonationsService {
@@ -17,6 +19,8 @@ export class DonationsService {
     private prisma: PrismaService,
     private thankYouMessagesService: ThankYouMessagesService,
     private platformFeesService: PlatformFeesService,
+    private notificationsService: NotificationsService,
+    private emailService: EmailService,
   ) {}
 
   async create(createDonationDto: CreateDonationDto, donorId?: string) {
@@ -82,6 +86,46 @@ export class DonationsService {
     });
 
     // Ne pas incrémenter les montants tant que le don n'est pas validé (pending)
+
+    // Envoyer une notification au créateur de la campagne
+    try {
+      await this.notificationsService.sendDonationNotification(
+        donation.campaign.creator.id,
+        {
+          campaignId: donation.campaignId,
+          donationId: donation.id,
+          amount: donation.amount,
+          donorName: donation.donorName || donation.donor?.firstName || 'Anonyme',
+        }
+      );
+      
+      // Notifier les admins du nouveau don
+      const admins = await this.prisma.user.findMany({ where: { role: 'admin' }, select: { id: true, email: true } });
+      const adminIds = admins.map(a => a.id);
+      if (adminIds.length > 0) {
+        await this.notificationsService.sendSystemNotification(
+          adminIds,
+          'Nouveau don reçu',
+          `Un don de ${donation.amount} Ar a été effectué sur "${donation.campaign.title}"`,
+          'info',
+        );
+        
+        // Envoyer email aux admins
+        try {
+          const adminEmail = process.env.ADMIN_EMAIL;
+          if (adminEmail) {
+            await (this.emailService as any).sendMailWithRetry({
+              from: { name: 'TOLOTANANA', address: process.env.EMAIL_FROM || 'support@tolotanana.com' },
+              to: adminEmail,
+              subject: 'Nouveau don reçu',
+              html: `<p>Un don de <strong>${donation.amount} Ar</strong> a été effectué sur la campagne <strong>"${donation.campaign.title}"</strong>.</p>`,
+            });
+          }
+        } catch {}
+      }
+    } catch (error) {
+      console.error('Erreur lors de l\'envoi de la notification de don:', error);
+    }
 
     return donation;
   }
@@ -277,6 +321,9 @@ export class DonationsService {
               currentAmount: {
                 increment: Number(currentDonation.amount),
               },
+              totalRaised: {
+                increment: Number(currentDonation.amount), // Ajouter au montant total collecté
+              },
             },
           });
 
@@ -293,6 +340,40 @@ export class DonationsService {
           console.error('Erreur lors de l\'envoi automatique du message de remerciement:', error);
           // Ne pas faire échouer la mise à jour de la donation si l'envoi du message échoue
         }
+
+        // Envoyer email au propriétaire de la campagne pour don validé
+        try {
+          const campaignOwner = await this.prisma.user.findUnique({
+            where: { id: currentDonation.campaign.creator.id },
+            select: { email: true, firstName: true }
+          });
+          if (campaignOwner?.email) {
+            await (this.emailService as any).sendMailWithRetry({
+              from: { name: 'TOLOTANANA', address: process.env.EMAIL_FROM || 'support@tolotanana.com' },
+              to: campaignOwner.email,
+              subject: 'Don validé sur votre campagne',
+              html: `<p>Bonjour ${campaignOwner.firstName || ''},<br/>Un don de <strong>${currentDonation.amount} Ar</strong> a été validé sur votre campagne <strong>"${currentDonation.campaign.title}"</strong>.</p>`,
+            });
+          }
+        } catch {}
+      }
+
+      // Envoyer email au propriétaire pour don en attente
+      if (updateDonationDto.status === 'pending' && currentDonation.status !== 'pending') {
+        try {
+          const campaignOwner = await this.prisma.user.findUnique({
+            where: { id: currentDonation.campaign.creator.id },
+            select: { email: true, firstName: true }
+          });
+          if (campaignOwner?.email) {
+            await (this.emailService as any).sendMailWithRetry({
+              from: { name: 'TOLOTANANA', address: process.env.EMAIL_FROM || 'support@tolotanana.com' },
+              to: campaignOwner.email,
+              subject: 'Nouveau don en attente',
+              html: `<p>Bonjour ${campaignOwner.firstName || ''},<br/>Un don de <strong>${currentDonation.amount} Ar</strong> est en attente de validation sur votre campagne <strong>"${currentDonation.campaign.title}"</strong>.</p>`,
+            });
+          }
+        } catch {}
       }
 
       // Gérer le cas où un don "completed" est annulé (passe à "failed" ou "pending")

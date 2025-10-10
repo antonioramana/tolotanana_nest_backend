@@ -400,11 +400,8 @@ export class EmailService {
     // Optionnel: Sauvegarder dans un fichier ou une base de données
     // await this.saveFailedEmail(emailLog);
 
-    return { 
-      messageId: 'manual-' + Date.now(), 
-      status: 'logged_for_manual_processing',
-      details: emailLog 
-    };
+    // En mode dégradé, on considère que l'email a échoué
+    throw new Error('Email fallback failed - logged for manual processing');
   }
 
   async sendContactReply(
@@ -659,6 +656,301 @@ export class EmailService {
           
           <div class="footer">
             <p>TOLOTANANA - Système de notification automatique</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  // Méthode pour obtenir l'adresse email d'expéditeur
+  private getFromAddress() {
+    return {
+      name: 'TOLOTANANA Support',
+      address: this.configService.get<string>('EMAIL_FROM', 'support@tolotanana.com'),
+    };
+  }
+
+  // Méthode pour envoyer un code de vérification pour changement d'email
+  async sendEmailVerificationCode(email: string, code: string, firstName: string): Promise<void> {
+    const subject = 'Code de vérification - Changement d\'adresse email';
+    const htmlContent = this.generateEmailVerificationTemplate(code, firstName);
+    
+    await this.sendMailWithRetry({
+      from: this.getFromAddress(),
+      to: email,
+      subject,
+      html: htmlContent,
+    });
+  }
+
+  // Méthode pour envoyer un code de vérification pour suppression de compte
+  async sendAccountDeletionVerificationCode(email: string, code: string, firstName: string): Promise<void> {
+    const subject = 'Code de vérification - Suppression de compte';
+    const htmlContent = this.generateAccountDeletionVerificationTemplate(code, firstName);
+    
+    await this.sendMailWithRetry({
+      from: this.getFromAddress(),
+      to: email,
+      subject,
+      html: htmlContent,
+    });
+  }
+
+  // Template pour le code de vérification de changement d'email
+  private generateEmailVerificationTemplate(code: string, firstName: string): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Code de vérification - Changement d'email</title>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f4f4f4; }
+          .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+          .header { background: linear-gradient(135deg, #ff6b35, #f7931e); color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0; margin: -20px -20px 20px -20px; }
+          .code-box { background-color: #f8f9fa; border: 2px dashed #ff6b35; padding: 20px; text-align: center; margin: 20px 0; border-radius: 8px; }
+          .verification-code { font-size: 32px; font-weight: bold; color: #ff6b35; letter-spacing: 5px; font-family: 'Courier New', monospace; }
+          .warning { background-color: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 15px; border-radius: 5px; margin: 20px 0; }
+          .footer { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; color: #666; font-size: 14px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>🔐 Code de vérification</h1>
+            <p>Changement d'adresse email</p>
+          </div>
+          
+          <p>Bonjour <strong>${firstName}</strong>,</p>
+          
+          <p>Vous avez demandé à changer votre adresse email. Pour confirmer ce changement, veuillez utiliser le code de vérification suivant :</p>
+          
+          <div class="code-box">
+            <p style="margin: 0 0 10px 0; font-size: 18px; color: #666;">Votre code de vérification :</p>
+            <div class="verification-code">${code}</div>
+          </div>
+          
+          <div class="warning">
+            <p><strong>⚠️ Important :</strong></p>
+            <ul>
+              <li>Ce code est valide pendant <strong>15 minutes</strong> uniquement</li>
+              <li>Ne partagez jamais ce code avec qui que ce soit</li>
+              <li>Si vous n'avez pas demandé ce changement, ignorez cet email</li>
+            </ul>
+          </div>
+          
+          <p>Si vous n'avez pas demandé ce changement d'email, veuillez ignorer ce message ou nous contacter immédiatement.</p>
+          
+          <div class="footer">
+            <p>TOLOTANANA - Plateforme de crowdfunding</p>
+            <p>Cet email a été envoyé automatiquement, merci de ne pas y répondre.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  // Template pour le code de vérification de suppression de compte
+  private generateAccountDeletionVerificationTemplate(code: string, firstName: string): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Code de vérification - Suppression de compte</title>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f4f4f4; }
+          .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+          .header { background: linear-gradient(135deg, #dc3545, #c82333); color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0; margin: -20px -20px 20px -20px; }
+          .code-box { background-color: #f8f9fa; border: 2px dashed #dc3545; padding: 20px; text-align: center; margin: 20px 0; border-radius: 8px; }
+          .verification-code { font-size: 32px; font-weight: bold; color: #dc3545; letter-spacing: 5px; font-family: 'Courier New', monospace; }
+          .danger { background-color: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 5px; margin: 20px 0; }
+          .footer { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; color: #666; font-size: 14px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>🗑️ Code de vérification</h1>
+            <p>Suppression de compte</p>
+          </div>
+          
+          <p>Bonjour <strong>${firstName}</strong>,</p>
+          
+          <p>Vous avez demandé la suppression de votre compte. Cette action est <strong>irréversible</strong> et supprimera définitivement toutes vos données.</p>
+          
+          <div class="code-box">
+            <p style="margin: 0 0 10px 0; font-size: 18px; color: #666;">Votre code de vérification :</p>
+            <div class="verification-code">${code}</div>
+          </div>
+          
+          <div class="danger">
+            <p><strong>🚨 ATTENTION - Action irréversible :</strong></p>
+            <ul>
+              <li>Ce code est valide pendant <strong>15 minutes</strong> uniquement</li>
+              <li>La suppression de votre compte est <strong>définitive</strong></li>
+              <li>Toutes vos données seront <strong>perdues à jamais</strong></li>
+              <li>Vos campagnes, dons et informations personnelles seront supprimés</li>
+            </ul>
+          </div>
+          
+          <p><strong>Si vous n'êtes pas sûr de vouloir supprimer votre compte, ignorez cet email.</strong></p>
+          
+          <div class="footer">
+            <p>TOLOTANANA - Plateforme de crowdfunding</p>
+            <p>Cet email a été envoyé automatiquement, merci de ne pas y répondre.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  async sendPasswordResetCode(email: string, code: string, firstName: string) {
+    const mailOptions = {
+      from: this.getFromAddress(),
+      to: email,
+      subject: '🔐 Code de réinitialisation de mot de passe - TOLOTANANA',
+      html: this.generatePasswordResetCodeTemplate(code, firstName),
+    };
+
+    await this.sendMailWithRetry(mailOptions);
+  }
+
+  private getBaseUrl(): string {
+    const nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
+    if (nodeEnv === 'production') {
+      return this.configService.get<string>('FRONTEND_URL', 'https://tolotanana.com');
+    }
+    return this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
+  }
+
+  private generatePasswordResetCodeTemplate(code: string, firstName: string): string {
+    return `
+      <!DOCTYPE html>
+      <html lang="fr">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Réinitialisation de mot de passe</title>
+        <style>
+          body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+          }
+          .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+          }
+          .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #3b82f6;
+          }
+          .logo {
+            font-size: 28px;
+            font-weight: bold;
+            color: #3b82f6;
+            margin-bottom: 10px;
+          }
+          .code-box {
+            background: #f8fafc;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 25px;
+            margin: 25px 0;
+            text-align: center;
+          }
+          .verification-code {
+            font-size: 32px;
+            font-weight: bold;
+            color: #1e40af;
+            background: white;
+            border: 2px solid #3b82f6;
+            border-radius: 8px;
+            padding: 15px 25px;
+            display: inline-block;
+            letter-spacing: 4px;
+            font-family: 'Courier New', monospace;
+            box-shadow: 0 4px 6px rgba(59, 130, 246, 0.1);
+          }
+          .info-box {
+            background: #f0f9ff;
+            border: 1px solid #0ea5e9;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+          }
+          .warning {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+          }
+          .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e5e7eb;
+            color: #6b7280;
+            font-size: 14px;
+          }
+          .link-fallback {
+            background: #f3f4f6;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 15px 0;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 12px;
+            color: #374151;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <div class="logo">🔐 TOLOTANANA</div>
+            <p style="margin: 0; color: #6b7280;">Réinitialisation de mot de passe</p>
+          </div>
+          
+          <p>Bonjour <strong>${firstName}</strong>,</p>
+          
+          <p>Vous avez demandé la réinitialisation de votre mot de passe. Utilisez le code ci-dessous pour créer un nouveau mot de passe sécurisé.</p>
+          
+          <div class="code-box">
+            <p style="margin: 0 0 10px 0; font-size: 18px; color: #666;">Votre code de vérification :</p>
+            <div class="verification-code">${code}</div>
+          </div>
+          
+          <div class="info-box">
+            <p><strong>ℹ️ Informations importantes :</strong></p>
+            <ul>
+              <li>Ce code est valide pendant <strong>15 minutes</strong> uniquement</li>
+              <li>Vous ne pouvez utiliser ce code qu'<strong>une seule fois</strong></li>
+              <li>Si vous n'avez pas demandé cette réinitialisation, ignorez cet email</li>
+            </ul>
+          </div>
+          
+          <p><strong>Si vous n'avez pas demandé cette réinitialisation, ignorez cet email. Votre mot de passe restera inchangé.</strong></p>
+          
+          <div class="footer">
+            <p>TOLOTANANA - Plateforme de crowdfunding</p>
+            <p>Cet email a été envoyé automatiquement, merci de ne pas y répondre.</p>
           </div>
         </div>
       </body>

@@ -51,4 +51,12 @@ export class CreateWithdrawalRequestDto {
   @IsArray()
   @IsUrl({}, { each: true, message: 'Chaque document doit être une URL valide' })
   documents: string[];
+
+  @ApiProperty({
+    description: 'Mot de passe actuel pour vérifier l\'identité',
+    example: 'MonMotDePasse@123',
+  })
+  @IsString()
+  @IsNotEmpty({ message: 'Le mot de passe est requis' })
+  password: string;
 }

@@ -96,3 +96,8 @@ console.log('🎓 Tutoriel: https://www.emailjs.com/docs/tutorial/');
 console.log('💬 Support: https://www.emailjs.com/docs/faq/');
 
 console.log('\n✨ Bonne configuration ! Vos emails ne tomberont plus jamais !');
+
+
+
+
+
