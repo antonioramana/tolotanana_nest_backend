@@ -50,6 +50,8 @@ export class CampaignsController {
   }
 
   @Get()
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Obtenir toutes les campagnes avec filtres' })
   @ApiResponse({
     status: 200,
@@ -57,9 +59,10 @@ export class CampaignsController {
   })
   async findAll(
     @Query() query: FindCampaignsQueryDto,
+    @CurrentUser('id') userId?: string,
   ) {
     const { page = 1, limit = 10, ...filters } = query as any;
-    return this.campaignsService.findAll(filters as CampaignFilterDto, { page, limit } as PaginationDto);
+    return this.campaignsService.findAll(filters as CampaignFilterDto, { page, limit } as PaginationDto, userId);
   }
 
   @Get('my-campaigns')
@@ -79,6 +82,8 @@ export class CampaignsController {
   }
 
   @Get(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Obtenir une campagne par son ID' })
   @ApiResponse({
     status: 200,
@@ -88,8 +93,11 @@ export class CampaignsController {
     status: 404,
     description: 'Campagne non trouvée',
   })
-  async findOne(@Param('id') id: string) {
-    return this.campaignsService.findOne(id);
+  async findOne(
+    @Param('id') id: string,
+    @CurrentUser('id') userId?: string,
+  ) {
+    return this.campaignsService.findOne(id, userId);
   }
 
   @Get(':id/donations')
@@ -159,6 +167,25 @@ export class CampaignsController {
     @Body() updateStatusDto: UpdateCampaignStatusDto,
   ) {
     return this.campaignsService.adminUpdateStatus(id, updateStatusDto);
+  }
+
+  @Post(':id/toggle-favorite')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Basculer le statut favori d\'une campagne' })
+  @ApiResponse({
+    status: 200,
+    description: 'Statut favori basculé avec succès',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Campagne non trouvée',
+  })
+  async toggleFavorite(
+    @Param('id') campaignId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.campaignsService.toggleFavorite(campaignId, userId);
   }
 
   @Post(':id/favorite')

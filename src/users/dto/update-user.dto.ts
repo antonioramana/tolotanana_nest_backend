@@ -3,7 +3,10 @@ import {
   IsString,
   IsOptional,
   Matches,
+  IsEnum,
+  IsBoolean,
 } from 'class-validator';
+import { UserRole } from '@prisma/client';
 
 export class UpdateUserDto {
   @ApiPropertyOptional({
@@ -38,4 +41,21 @@ export class UpdateUserDto {
     { message: 'Le numéro de téléphone doit contenir 10 à 20 chiffres (optionnellement précédé de +)' })
   @IsOptional()
   phone?: string;
+
+  @ApiPropertyOptional({
+    description: 'Rôle de l\'utilisateur',
+    enum: UserRole,
+    example: 'donateur',
+  })
+  @IsEnum(UserRole, { message: 'Le rôle doit être: demandeur, donateur, ou admin' })
+  @IsOptional()
+  role?: UserRole;
+
+  @ApiPropertyOptional({
+    description: 'Statut de vérification du compte',
+    example: true,
+  })
+  @IsBoolean()
+  @IsOptional()
+  isVerified?: boolean;
 }

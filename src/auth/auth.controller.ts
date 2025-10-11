@@ -253,4 +253,38 @@ export class AuthController {
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     return this.authService.resetPassword(resetPasswordDto);
   }
+
+  @Post('verify-admin-password')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Vérifier le mot de passe administrateur' })
+  @ApiResponse({
+    status: 200,
+    description: 'Mot de passe administrateur vérifié avec succès',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Mot de passe incorrect',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Accès refusé - rôle admin requis',
+  })
+  async verifyAdminPassword(
+    @Body() body: { adminId: string; password: string },
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    // Vérifier que l'utilisateur est admin
+    if (userRole !== 'admin') {
+      throw new Error('Accès refusé - rôle admin requis');
+    }
+
+    // Vérifier que l'adminId correspond à l'utilisateur connecté
+    if (body.adminId !== userId) {
+      throw new Error('ID administrateur invalide');
+    }
+
+    return this.authService.verifyAdminPassword(body.adminId, body.password);
+  }
 }

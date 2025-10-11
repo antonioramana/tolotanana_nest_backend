@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EmailService } from '../email/email.service';
+import { FavoritesService } from '../favorites/favorites.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { CampaignFilterDto } from './dto/campaign-filter.dto';
@@ -20,6 +21,7 @@ export class CampaignsService {
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
     private emailService: EmailService,
+    private favoritesService: FavoritesService,
   ) {}
 
   // Fonctions utilitaires pour gérer le message de remerciement dans la description
@@ -102,7 +104,7 @@ export class CampaignsService {
     return created;
   }
 
-  async findAll(filters: CampaignFilterDto, pagination: PaginationDto) {
+  async findAll(filters: CampaignFilterDto, pagination: PaginationDto, userId?: string) {
     const { page, limit } = pagination;
     const skip = (page - 1) * limit;
 
@@ -167,10 +169,21 @@ export class CampaignsService {
       this.prisma.campaign.count({ where }),
     ]);
 
+    // Ajouter isFavoris pour chaque campagne si userId est fourni
+    const campaignsWithFavorites = await Promise.all(
+      campaigns.map(async (campaign) => {
+        const isFavoris = userId ? await this.favoritesService.isFavorite(campaign.id, userId) : false;
+        return {
+          ...campaign,
+          isFavoris,
+        };
+      })
+    );
+
     const totalPages = Math.ceil(total / limit);
 
     return {
-      data: campaigns,
+      data: campaignsWithFavorites,
       meta: {
         page,
         limit,
@@ -249,10 +262,21 @@ export class CampaignsService {
       this.prisma.campaign.count({ where }),
     ]);
 
+    // Ajouter isFavoris pour chaque campagne
+    const campaignsWithFavorites = await Promise.all(
+      campaigns.map(async (campaign) => {
+        const isFavoris = await this.favoritesService.isFavorite(campaign.id, userId);
+        return {
+          ...campaign,
+          isFavoris,
+        };
+      })
+    );
+
     const totalPages = Math.ceil(total / limit);
 
     return {
-      data: campaigns,
+      data: campaignsWithFavorites,
       meta: {
         page,
         limit,
@@ -264,7 +288,7 @@ export class CampaignsService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, userId?: string) {
     const campaign = await this.prisma.campaign.findUnique({
       where: { id },
       include: {
@@ -321,12 +345,16 @@ export class CampaignsService {
     const thankYouMessage = this.extractThankYouMessage(campaign.description);
     const originalDescription = this.getOriginalDescription(campaign.description);
 
+    // Ajouter isFavoris si userId est fourni
+    const isFavoris = userId ? await this.favoritesService.isFavorite(id, userId) : false;
+
     return {
       ...campaign,
       description: originalDescription,
       thankYouMessage,
       donations,
       stats,
+      isFavoris,
     };
   }
 
@@ -433,6 +461,10 @@ export class CampaignsService {
     await this.prisma.campaign.delete({
       where: { id },
     });
+  }
+
+  async toggleFavorite(campaignId: string, userId: string) {
+    return this.favoritesService.toggleFavorite(campaignId, userId);
   }
 
   async addToFavorites(campaignId: string, userId: string) {

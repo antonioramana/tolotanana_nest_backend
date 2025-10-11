@@ -491,4 +491,26 @@ export class AuthService {
 
     return { message: 'Mot de passe réinitialisé avec succès' };
   }
+
+  async verifyAdminPassword(adminId: string, password: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: adminId },
+    });
+
+    if (!user) {
+      throw new Error('Administrateur non trouvé');
+    }
+
+    if (user.role !== 'admin') {
+      throw new Error('Accès refusé - rôle admin requis');
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    
+    if (!isPasswordValid) {
+      throw new Error('Mot de passe administrateur incorrect');
+    }
+
+    return { message: 'Mot de passe administrateur vérifié avec succès' };
+  }
 }
