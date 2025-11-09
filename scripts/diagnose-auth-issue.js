@@ -97,3 +97,6 @@ console.log('4. Testez avec la page /debug-auth pour diagnostiquer');
 console.log('5. Vérifiez les logs du backend pour plus de détails');
 
 console.log('\n✅ Diagnostic terminé !');
+
+
+
