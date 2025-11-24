@@ -3,8 +3,8 @@ services:
     name: tolotanana-backend
     env: node
     plan: free
-    buildCommand: npm install && npx prisma migrate deploy && npm run prisma:seed && npm run build:prod
-    startCommand: node start-production.js
+    buildCommand: pnpm install --frozen-lockfile && pnpm run prisma:migrate:deploy && pnpm run build
+    startCommand: pnpm run start
     envVars:
       - key: NODE_ENV
         value: production
