@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EmailService } from '../email/email.service';
@@ -24,6 +25,94 @@ export class CampaignsService {
     private favoritesService: FavoritesService,
   ) {}
 
+  private readonly CAMPAIGN_REFERENCE_PREFIX = 'TAAA';
+  private readonly CAMPAIGN_REFERENCE_PAD = 6;
+
+  private formatCampaignReference(counter: number) {
+    return `${this.CAMPAIGN_REFERENCE_PREFIX}${String(counter).padStart(
+      this.CAMPAIGN_REFERENCE_PAD,
+      '0',
+    )}`;
+  }
+
+  private async getNextCampaignReference() {
+    const latest = await this.prisma.campaign.findFirst({
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const latestReference = (latest as { reference?: string } | null)?.reference;
+
+    if (!latestReference?.startsWith(this.CAMPAIGN_REFERENCE_PREFIX)) {
+      return this.formatCampaignReference(1);
+    }
+
+    const numericPart = parseInt(
+      latestReference.replace(this.CAMPAIGN_REFERENCE_PREFIX, ''),
+      10,
+    );
+    const nextNumber = Number.isFinite(numericPart) ? numericPart + 1 : 1;
+    return this.formatCampaignReference(nextNumber);
+  }
+
+  private async createCampaignRecord(
+    createCampaignDto: CreateCampaignDto,
+    userId: string,
+  ): Promise<
+    Prisma.CampaignGetPayload<{
+      include: {
+        category: true;
+        creator: {
+          select: {
+            id: true;
+            firstName: true;
+            lastName: true;
+            avatar: true;
+            email: true;
+          };
+        };
+      };
+    }>
+  > {
+    const maxAttempts = 5;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const reference = await this.getNextCampaignReference();
+      try {
+        return await this.prisma.campaign.create({
+          data: {
+            ...createCampaignDto,
+            reference,
+            createdBy: userId,
+          } as any,
+          include: {
+            category: true,
+            creator: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                avatar: true,
+                email: true,
+              },
+            },
+          },
+        });
+      } catch (error: any) {
+        if (
+          error?.code === 'P2002' &&
+          error?.meta?.target?.includes('Campaign_reference_key')
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw new Error(
+      'Impossible de générer une référence unique pour la campagne',
+    );
+  }
+
   // Fonctions utilitaires pour gérer le message de remerciement dans la description
   private extractThankYouMessage(description: string): string | null {
     if (description.includes('|||')) {
@@ -41,24 +130,7 @@ export class CampaignsService {
   }
 
   async create(createCampaignDto: CreateCampaignDto, userId: string) {
-    const created = await this.prisma.campaign.create({
-      data: {
-        ...createCampaignDto,
-        createdBy: userId,
-      },
-      include: {
-        category: true,
-        creator: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            avatar: true,
-            email: true,
-          },
-        },
-      },
-    });
+    const created = await this.createCampaignRecord(createCampaignDto, userId);
 
     // Notifier les admins d'une nouvelle campagne
     const admins = await this.prisma.user.findMany({ where: { role: 'admin' }, select: { id: true, email: true, firstName: true } });

@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { PrismaClient, Prisma, UserRole, BankInfoType, CampaignStatus, DonationStatus, WithdrawalStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
@@ -102,6 +103,7 @@ async function seedMain() {
     update: {},
     create: {
       id: 'seed-camp-a',
+      reference: 'TAAA000001',
       title: 'Opération chirurgicale urgente',
       description: 'Aider à financer une opération vitale.',
       targetAmount: new Prisma.Decimal('5000.00'),
@@ -115,7 +117,7 @@ async function seedMain() {
       rating: new Prisma.Decimal('4.50'),
       totalDonors: 0,
       isVerified: true,
-    },
+    } as any,
   });
 
   const campaignB = await prisma.campaign.upsert({
@@ -123,6 +125,7 @@ async function seedMain() {
     update: {},
     create: {
       id: 'seed-camp-b',
+      reference: 'TAAA000002',
       title: "Fournitures scolaires pour l\'année",
       description: "Aider des élèves à obtenir des fournitures scolaires.",
       targetAmount: new Prisma.Decimal('2000.00'),
@@ -135,7 +138,7 @@ async function seedMain() {
       rating: new Prisma.Decimal('4.20'),
       totalDonors: 0,
       isVerified: true,
-    },
+    } as any,
   });
 
   // Donations
